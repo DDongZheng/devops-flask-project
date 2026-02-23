@@ -3,6 +3,7 @@ name: CI-DevSecOps
 on:
   push:
     branches: [ "main" ]
+    tags: ['v*.*.*']
 
 env:
   REGISTRY: ghcr.io
@@ -11,8 +12,11 @@ env:
 jobs:
   test-and-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository 
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -23,17 +27,17 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run Tests
+      - name: Run Tests (Pytest)
         run: |
           pytest test_app.py
 
-      - name: Security Scan (Trivy)
+      - name: Codebase Security Scan (Trivy FS)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: '.'
           scan-type: 'fs'
+          scan-ref: '.'
           format: 'table'
-          exit-code: '1'
+          exit-code: '1' # 发现高危漏洞则报错
           severity: 'CRITICAL,HIGH'
 
   build-and-push:
@@ -60,10 +64,33 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      - name: Build and push Docker image
+      # 步骤 1: 构建并加载到本地 Docker 引擎 (用于扫描)
+      - name: Build Docker image (Load for Scan)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:security-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 步骤 2: 扫描生成的镜像
+      - name: Image Vulnerability Scan (Trivy Image)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:security-check
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      # 步骤 3: 扫描通过后，正式推送
+      # 这里利用了构建好的缓存，所以速度很快
+      - name: Build and push Docker image (Final)
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
