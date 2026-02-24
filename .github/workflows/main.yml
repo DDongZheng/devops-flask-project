@@ -48,10 +48,6 @@ jobs:
       packages: write
 
     steps:
-      - name: Set Lowercase image name 
-        id: image
-        run: echo "name=${{ env.REGISTRY }}/$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
-        
       - name: Checkout repository
         uses: actions/checkout@v3
 
