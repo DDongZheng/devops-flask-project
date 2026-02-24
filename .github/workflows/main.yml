@@ -18,6 +18,11 @@ jobs:
       - name: Checkout repository 
         uses: actions/checkout@v3
 
+      - name: Secret Scanning(Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -51,38 +56,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Lowercase the repo name
+        run: echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
 
-      # 步骤 1: 只构建+写缓存，导出为 tar 文件（不 load，不 push）
-      - name: Build Docker image (export as tar)
-        uses: docker/build-push-action@v4
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          # 使用转为小写后的变量
+          images: ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}
+
+      - name: Build Docker image (Load for Scan)
+        uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
-          outputs: type=docker,dest=/tmp/image.tar   # ✅ 导出为 tar，兼容 docker-container driver
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:security-check
+          load: true
+          # 使用转为小写后的变量
+          tags: ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}:security-check
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-      # 步骤 2: 加载 tar 到本地 Docker
-      - name: Load image into Docker
-        run: docker load --input /tmp/image.tar
-
-      # 步骤 3: 扫描
       - name: Image Vulnerability Scan (Trivy Image)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:security-check
+          image-ref: ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}:security-check
           format: 'table'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # 步骤 4: 扫描通过后正式推送（命中缓存，很快）
       - name: Build and push Docker image (Final)
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
