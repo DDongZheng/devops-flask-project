@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  flask-app:
+    image: ghcr.io/ddongzheng/devops-flask-project:main
+    ports:
+      - "5000:5000"
+    restart: always
+    environment:
+      - FLASK_ENV=production
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
